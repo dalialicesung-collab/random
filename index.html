@@ -1,0 +1,685 @@
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多元隨機座位表</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+        
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background-color: white; }
+            #classroom-container { border: none; box-shadow: none; padding: 0; }
+            .seat-card { border: 1px solid #000; }
+        }
+
+        /* 座位卡片基礎 */
+        .seat-card {
+            transition: all 0.2s;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: white;
+            z-index: 10;
+        }
+
+        /* 缺席狀態 */
+        .student-active.absent {
+            background-color: #fee2e2 !important;
+            border-color: #ef4444 !important;
+            color: #b91c1c !important;
+        }
+        .student-active.absent::after {
+            content: '(缺席)';
+            font-size: 0.7em;
+            color: #dc2626;
+        }
+
+        /* 拖曳中 */
+        .dragging { opacity: 0.5; border: 2px dashed #4f46e5; transform: scale(0.95); }
+
+        /* 鎖定狀態 */
+        .seat-locked {
+            background-color: #e5e7eb;
+            background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, #d1d5db 5px, #d1d5db 10px);
+            cursor: pointer;
+            display: flex; justify-content: center; align-items: center; color: #9ca3af;
+        }
+
+        /* --- 桌子形狀樣式 --- */
+        
+        /* 長方形桌 (預設) */
+        .table-rect {
+            border-radius: 0.5rem;
+            background-color: #fffbeb; /* amber-50 */
+            border: 2px solid #d1d5db;
+        }
+
+        /* 圓桌 (6組、7組專用) */
+        .table-round {
+            border-radius: 50%;
+            background-color: #ecfccb; /* lime-100 */
+            border: 4px solid #84cc16; /* lime-500 */
+            aspect-ratio: 1 / 1; /* 強制正圓 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        
+        .table-round::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%; height: 90%;
+            border: 1px dashed #a3e635;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        /* 圓桌內的座位網格微調，讓它集中 */
+        .table-round .seat-grid {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-content: center;
+            gap: 4px;
+        }
+        
+        .table-round .seat-card {
+            width: 46%; /* 稍微小於一半，讓2個可以並排 */
+            height: 30%; /* 3排 */
+            font-size: 0.8rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* 模式切換開關 */
+        .toggle-checkbox:checked { right: 0; border-color: #4f46e5; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #4f46e5; }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="mb-6 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg shadow no-print">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-chair mr-2 text-indigo-600"></i>多元隨機座位表 <span class="text-sm text-white bg-indigo-600 px-2 py-1 rounded ml-2">多模式版</span></h1>
+            <p class="text-sm text-gray-500 mt-1">支援：圓桌/方桌切換、7組交錯排列、拖曳換位、缺席管理</p>
+        </div>
+        <div class="mt-4 md:mt-0 text-right">
+            <div id="clock" class="text-xl font-mono font-bold text-indigo-600"></div>
+            <div id="date" class="text-sm text-gray-600"></div>
+        </div>
+    </header>
+
+    <!-- Controls Area -->
+    <div class="no-print grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
+        
+        <!-- Step 1 & 2: Input & Config -->
+        <div class="lg:col-span-5 bg-white p-4 rounded-lg shadow flex flex-col gap-4">
+            
+            <!-- Step 1 -->
+            <div>
+                <label class="block text-sm font-bold text-gray-800 mb-2 bg-gray-100 p-1 rounded">
+                    <span class="bg-gray-800 text-white px-2 py-0.5 rounded text-xs mr-2">步驟 1</span>貼上名單
+                </label>
+                <textarea id="inputData" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 text-sm font-mono h-24" placeholder="格式：班級+座號+姓名 (3欄) 或 座號+姓名 (2欄)"></textarea>
+            </div>
+
+            <!-- Step 2 -->
+            <div>
+                <label class="block text-sm font-bold text-gray-800 mb-2 bg-gray-100 p-1 rounded">
+                    <span class="bg-gray-800 text-white px-2 py-0.5 rounded text-xs mr-2">步驟 2</span>選擇組別模式
+                </label>
+                <select id="groupMode" onchange="changeGroupMode()" class="w-full p-2 border-2 border-indigo-200 rounded text-indigo-900 font-bold focus:ring-2 focus:ring-indigo-500">
+                    <option value="6" selected>6 組 (2x3 矩陣) - 每組6人 [圓桌]</option>
+                    <option value="9">9 組 (3x3 矩陣) - 每組4人 [方桌]</option>
+                    <option value="7">7 組 (2-3-2 排列) - 每組5人 [圓桌]</option>
+                    <option value="8">8 組 (2x4 矩陣) - 每組5人 [方桌]</option>
+                    <option value="20">20 組 (5x4 矩陣) - 每組2人 [方桌]</option>
+                </select>
+                <div id="mode-desc" class="text-xs text-gray-500 mt-1 ml-1">
+                    當前設定：3列3行，共36人
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-2">
+                <button onclick="parseAndShuffle()" class="flex-1 bg-indigo-600 text-white py-3 px-4 rounded hover:bg-indigo-700 transition font-bold shadow text-lg">
+                    <i class="fa-solid fa-shuffle mr-2"></i>隨機排列
+                </button>
+                <button onclick="clearAll()" class="px-4 py-3 border border-gray-300 rounded hover:bg-red-50 text-red-600" title="清空">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 3: Controls & Stats -->
+        <div class="lg:col-span-7 flex flex-col gap-4">
+            <!-- Mode Toggle -->
+            <div class="bg-white p-4 rounded-lg shadow border-l-4 border-indigo-500 flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-gray-800"><i class="fa-solid fa-hand-pointer mr-2"></i>操作模式</h3>
+                    <div id="instruction-text" class="text-xs text-blue-600 mt-1">
+                        <i class="fa-solid fa-info-circle"></i> 點名/拖曳模式
+                    </div>
+                </div>
+                
+                <div class="flex items-center bg-gray-100 p-2 rounded-full">
+                    <span class="text-xs mr-2 font-bold px-2" id="mode-text-attendance">點名/換位</span>
+                    <div class="relative inline-block w-12 mr-2 align-middle select-none">
+                        <input type="checkbox" name="toggle" id="modeToggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 left-0 transition-all duration-300" onclick="toggleMode()">
+                        <label for="modeToggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                    </div>
+                    <span class="text-xs font-bold text-gray-400 px-2" id="mode-text-lock">鎖定空位</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <!-- Stats -->
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <div class="flex justify-between items-center border-b pb-2 mb-2">
+                        <span class="text-gray-600">總人數</span>
+                        <span id="countTotal" class="font-bold text-xl">0</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-600">缺席</span>
+                        <span id="countAbsent" class="font-bold text-xl text-red-600">0</span>
+                    </div>
+                </div>
+
+                <!-- Export -->
+                <div class="bg-white p-4 rounded-lg shadow flex flex-col justify-center gap-2">
+                    <button onclick="exportToWord()" class="w-full bg-blue-600 text-white py-1.5 px-3 rounded hover:bg-blue-700 transition text-sm text-left flex items-center">
+                        <i class="fa-solid fa-file-word mr-2 w-4"></i> 下載座位表
+                    </button>
+                    <button onclick="exportToExcel()" class="w-full bg-green-600 text-white py-1.5 px-3 rounded hover:bg-green-700 transition text-sm text-left flex items-center">
+                        <i class="fa-solid fa-file-excel mr-2 w-4"></i> 下載名單
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Seating Area -->
+    <div id="classroom-container" class="bg-white p-6 rounded-lg shadow-lg border-t-8 border-indigo-600 w-full overflow-x-auto mx-auto mb-10 transition-all duration-500">
+        
+        <div class="hidden" id="print-header">
+            <h2 class="text-3xl font-bold text-center mb-2">多元隨機座位表</h2>
+            <p class="text-center text-lg mb-4" id="print-time"></p>
+        </div>
+
+        <div class="w-full bg-gray-800 text-white text-center py-2 rounded mb-8 tracking-widest text-lg shadow-md">
+            講 台 / 黑 板
+        </div>
+
+        <!-- The Grid Container -->
+        <!-- Flex is used here to handle the 7-group staggered layout nicely -->
+        <div id="tables-grid" class="flex flex-wrap justify-center gap-6 w-full">
+            <!-- JS will populate this -->
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const CONFIGS = {
+            6: { tables: 6, seatsPerTable: 6, style: 'round', desc: '6組 (2x3矩陣) - 圓桌6人', widthClass: 'w-[30%] md:w-[30%]' },
+            // Updated: 7 groups, 5 seats, 2-3-2 layout forced in renderGrid
+            7: { tables: 7, seatsPerTable: 5, style: 'round', desc: '7組 (2-3-2交錯) - 圓桌5人', widthClass: 'w-[45%] md:w-[30%] lg:w-[30%]' }, 
+            8: { tables: 8, seatsPerTable: 5, style: 'rect', desc: '8組 (2x4矩陣) - 方桌5人', widthClass: 'w-[45%] md:w-[22%]' },
+            9: { tables: 9, seatsPerTable: 4, style: 'rect', desc: '9組 (3x3矩陣) - 方桌4人', widthClass: 'w-[30%] md:w-[30%]' },
+            // 20 groups now use widthClass approx 22% and will rely on renderGrid logic for side-by-side
+            20: { tables: 20, seatsPerTable: 2, style: 'rect', desc: '20組 (5x4矩陣) - 方桌2人', widthClass: 'w-[22%] md:w-[22%]' }
+        };
+
+        // --- State ---
+        let currentMode = 6; // Default set to 6
+        let gridState = []; // Will store {student} or 'LOCKED' or null
+        let absentSet = new Set();
+        let isLockMode = false;
+
+        window.onload = function() {
+            changeGroupMode(true); // Initialize
+            updateTime();
+            setInterval(updateTime, 1000);
+        };
+
+        // --- Logic ---
+
+        function changeGroupMode(isInit = false) {
+            const select = document.getElementById('groupMode');
+            currentMode = parseInt(select.value);
+            const config = CONFIGS[currentMode];
+
+            // Update UI Text
+            document.getElementById('mode-desc').innerText = `目前設定：${config.desc} (總位數: ${config.tables * config.seatsPerTable})`;
+
+            // Reset Grid Data Structure
+            const totalCapacity = config.tables * config.seatsPerTable;
+            
+            gridState = new Array(totalCapacity).fill(null);
+            absentSet.clear();
+            
+            renderGrid();
+        }
+
+        function parseAndShuffle() {
+            const rawText = document.getElementById('inputData').value.trim();
+            if (!rawText) {
+                alert('請先輸入名單資料！');
+                return;
+            }
+
+            // 1. Parse Input
+            let newStudents = [];
+            const lines = rawText.split('\n');
+            lines.forEach(line => {
+                let parts = line.split(/[\t\s]+/); // Split by tab or space
+                parts = parts.filter(p => p.trim() !== ''); // Clean empty
+                
+                if (parts.length >= 3) {
+                    // Class | Seat | Name
+                    const cls = parts[0].trim();
+                    const seat = parts[1].trim();
+                    const name = parts[2].trim();
+                    // ID Formatting
+                    const cleanClass = cls.replace(/\D/g, ''); 
+                    const cleanSeat = seat.replace(/\D/g, '');
+                    const paddedSeat = cleanSeat.length === 1 ? '0' + cleanSeat : cleanSeat;
+                    newStudents.push({
+                        id: Math.random().toString(36).substr(2, 9),
+                        displayId: cleanClass + paddedSeat,
+                        name: name,
+                        originalClass: cls, originalSeat: seat
+                    });
+                } else if (parts.length === 2) {
+                    // Smart Detect: Seat|Name OR Class|Seat
+                    const p1 = parts[0].trim();
+                    const p2 = parts[1].trim();
+                    const isP2Num = /^\d+$/.test(p2.replace(/\D/g, ''));
+                    
+                    if (isP2Num) { // Class + Seat
+                        const cleanSeat = p2.replace(/\D/g, '');
+                        newStudents.push({
+                            id: Math.random().toString(36).substr(2, 9),
+                            displayId: p1.replace(/\D/g,'') + (cleanSeat.length===1?'0'+cleanSeat:cleanSeat),
+                            name: '同學',
+                            originalClass: p1, originalSeat: p2
+                        });
+                    } else { // Seat + Name
+                         const cleanSeat = p1.replace(/\D/g, '');
+                         newStudents.push({
+                            id: Math.random().toString(36).substr(2, 9),
+                            displayId: (cleanSeat.length===1?'0'+cleanSeat:cleanSeat),
+                            name: p2,
+                            originalClass: '', originalSeat: p1
+                        });
+                    }
+                }
+            });
+
+            // 2. Prepare Slots
+            let availableIndices = [];
+            for(let i=0; i<gridState.length; i++) {
+                if(gridState[i] !== 'LOCKED') availableIndices.push(i);
+            }
+
+            if(newStudents.length > availableIndices.length) {
+                alert(`警告：名單有 ${newStudents.length} 人，但可用座位只有 ${availableIndices.length} 個。\n超出的學生將無法排入。`);
+            }
+
+            // 3. Shuffle & Fill
+            shuffleArray(newStudents);
+            
+            // Clear current non-locked students
+            for(let i=0; i<gridState.length; i++) {
+                if(gridState[i] !== 'LOCKED') gridState[i] = null;
+            }
+
+            newStudents.forEach((student, i) => {
+                if(i < availableIndices.length) {
+                    gridState[availableIndices[i]] = student;
+                }
+            });
+
+            absentSet.clear();
+            renderGrid();
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function clearAll() {
+            if(confirm('確定清空？(鎖定格會保留)')) {
+                document.getElementById('inputData').value = '';
+                for(let i=0; i<gridState.length; i++) {
+                    if(gridState[i] !== 'LOCKED') gridState[i] = null;
+                }
+                absentSet.clear();
+                renderGrid();
+            }
+        }
+
+        // --- Interaction ---
+
+        function toggleMode() {
+            const toggle = document.getElementById('modeToggle');
+            isLockMode = toggle.checked;
+            
+            const attendText = document.getElementById('mode-text-attendance');
+            const lockText = document.getElementById('mode-text-lock');
+            const instruct = document.getElementById('instruction-text');
+
+            if (isLockMode) {
+                attendText.classList.replace('text-gray-800', 'text-gray-400');
+                lockText.classList.replace('text-gray-400', 'text-gray-800');
+                instruct.innerHTML = '<i class="fa-solid fa-lock"></i> 鎖定模式：點擊格子可封鎖/解鎖';
+                instruct.className = "text-xs text-indigo-600 mt-1 font-bold";
+            } else {
+                lockText.classList.replace('text-gray-800', 'text-gray-400');
+                attendText.classList.replace('text-gray-400', 'text-gray-800');
+                instruct.innerHTML = '<i class="fa-solid fa-info-circle"></i> 點名/拖曳模式：點擊缺席，拖曳換位';
+                instruct.className = "text-xs text-blue-600 mt-1";
+            }
+            renderGrid();
+        }
+
+        function handleSeatClick(index) {
+            if (isLockMode) {
+                gridState[index] = (gridState[index] === 'LOCKED') ? null : 'LOCKED';
+                renderGrid();
+            } else {
+                const item = gridState[index];
+                if (item && item !== 'LOCKED') {
+                    if (absentSet.has(item.id)) absentSet.delete(item.id);
+                    else absentSet.add(item.id);
+                    renderGrid();
+                }
+            }
+        }
+
+        // --- Drag & Drop ---
+        let dragSrcIndex = null;
+        function handleDragStart(e, index) {
+            if (isLockMode) { e.preventDefault(); return; }
+            dragSrcIndex = index;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', index);
+            e.target.classList.add('dragging');
+        }
+        function handleDragOver(e) { if(e.preventDefault) e.preventDefault(); return false; }
+        function handleDrop(e, targetIndex) {
+            e.stopPropagation();
+            document.querySelectorAll('.dragging').forEach(el=>el.classList.remove('dragging'));
+            
+            if (isLockMode || dragSrcIndex === null || dragSrcIndex === targetIndex) return false;
+            if (gridState[targetIndex] === 'LOCKED') return false;
+
+            // Swap
+            const temp = gridState[targetIndex];
+            gridState[targetIndex] = gridState[dragSrcIndex];
+            gridState[dragSrcIndex] = temp;
+            
+            renderGrid();
+            return false;
+        }
+
+        // --- Rendering ---
+
+        function renderGrid() {
+            const container = document.getElementById('tables-grid');
+            container.innerHTML = '';
+            
+            const config = CONFIGS[currentMode];
+            const tables = config.tables;
+            const seatsPer = config.seatsPerTable;
+            const isRound = config.style === 'round';
+            
+            let studentCount = 0;
+
+            for (let t = 0; t < tables; t++) {
+                // FORCE LINE BREAKS FOR MODE 7 (2 - 3 - 2 Layout)
+                if (currentMode === 7) {
+                    if (t === 2 || t === 5) {
+                        const breakDiv = document.createElement('div');
+                        breakDiv.className = "w-full h-0"; // Force wrap
+                        container.appendChild(breakDiv);
+                    }
+                }
+
+                // Table Container
+                const tableDiv = document.createElement('div');
+                // Apply width class based on config for flex layout
+                tableDiv.className = `relative p-2 mb-4 ${config.widthClass} flex-shrink-0`;
+                
+                // Determine styling based on shape
+                const shapeClass = isRound ? 'table-round' : 'table-rect';
+                
+                // Create visual table wrapper
+                const visualTable = document.createElement('div');
+                visualTable.className = `${shapeClass} w-full h-full relative`;
+                
+                // Table Label
+                const label = document.createElement('div');
+                label.className = "absolute -top-3 left-0 bg-white border border-gray-400 text-gray-800 text-xs font-bold px-2 py-0.5 rounded shadow-sm z-20";
+                label.innerText = `第 ${t + 1} 組`;
+                tableDiv.appendChild(label);
+
+                // Seat Grid Container
+                const seatContainer = document.createElement('div');
+                if (isRound) {
+                    seatContainer.className = "seat-grid"; // Special flex layout for round
+                } else {
+                    // Rect layout
+                    // Updated logic: Always use 2 cols unless seatsPer=1 (unlikely)
+                    // This ensures 20-group (2 seats) are side-by-side (1 row, 2 cols)
+                    let gridCols = 2;
+                    if(seatsPer === 1) gridCols = 1;
+                    seatContainer.className = `grid grid-cols-${gridCols} gap-2 w-full`;
+                }
+
+                // Generate Seats
+                for (let s = 0; s < seatsPer; s++) {
+                    const globalIndex = t * seatsPer + s;
+                    const item = gridState[globalIndex];
+                    
+                    const seatDiv = document.createElement('div');
+                    
+                    // Style logic
+                    let baseClass = "seat-card cursor-pointer ";
+                    if(!isRound) baseClass += "h-16 border rounded "; // Rect styles
+                    
+                    if (item === 'LOCKED') {
+                        seatDiv.className = baseClass + "seat-locked";
+                        if(!isRound) seatDiv.innerHTML = '<i class="fa-solid fa-ban"></i>';
+                        else seatDiv.innerHTML = '<i class="fa-solid fa-ban"></i>'; // Round lock
+                    } else if (item) {
+                        // Student
+                        studentCount++;
+                        const isAbsent = absentSet.has(item.id);
+                        seatDiv.className = baseClass + "student-active border-gray-300 hover:shadow-md " + (isAbsent ? "absent" : "");
+                        seatDiv.draggable = !isLockMode;
+                        
+                        // Font adjustments
+                        const fontSize = isRound ? "text-xs" : "text-base";
+                        
+                        seatDiv.innerHTML = `
+                            <div class="font-mono font-bold leading-none ${isRound?'text-[10px]':'text-sm'} text-gray-500 mb-0.5 pointer-events-none">${item.displayId}</div>
+                            <div class="font-bold leading-tight ${fontSize} text-gray-900 pointer-events-none text-center px-1 truncate w-full">${item.name}</div>
+                        `;
+                        
+                        seatDiv.ondragstart = (e) => handleDragStart(e, globalIndex);
+                        seatDiv.ondrop = (e) => handleDrop(e, globalIndex);
+                        seatDiv.ondragover = handleDragOver;
+                    } else {
+                        // Empty
+                        seatDiv.className = baseClass + "border-dashed border-gray-300 opacity-50";
+                        seatDiv.innerHTML = "<span class='text-gray-300 text-xs'>空</span>";
+                        seatDiv.ondrop = (e) => handleDrop(e, globalIndex);
+                        seatDiv.ondragover = handleDragOver;
+                    }
+                    
+                    seatDiv.onclick = () => handleSeatClick(globalIndex);
+                    seatContainer.appendChild(seatDiv);
+                }
+
+                visualTable.appendChild(seatContainer);
+                tableDiv.appendChild(visualTable);
+                container.appendChild(tableDiv);
+            }
+
+            document.getElementById('countTotal').innerText = studentCount;
+            document.getElementById('countAbsent').innerText = absentSet.size;
+        }
+
+        // --- Utilities ---
+        function updateTime() {
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}/${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')}`;
+            const timeStr = now.toLocaleTimeString('zh-TW', {hour12:false});
+            document.getElementById('date').innerText = dateStr;
+            document.getElementById('clock').innerText = timeStr;
+            document.getElementById('print-time').innerText = `${dateStr} ${timeStr}`;
+        }
+        function getDateTimeString() {
+            const now = new Date();
+            return `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+        }
+
+        // --- Export to Word (Complex Layout Handling) ---
+        function exportToWord() {
+            if (!gridState.some(x => x && typeof x === 'object')) {
+                alert("無資料可匯出！"); return;
+            }
+            
+            const config = CONFIGS[currentMode];
+            const timeStr = document.getElementById('print-time').innerText;
+            
+            // Build HTML
+            let wordHTML = `
+                <h2 style="text-align:center; font-size:24px; margin-bottom:10px;">多元隨機座位表 (${config.desc})</h2>
+                <p style="text-align:center; margin-bottom:20px; font-size:10pt;">${timeStr}</p>
+                <div style="background:#333; color:#fff; text-align:center; padding:5px; margin-bottom:20px;">講 台</div>
+                <table style="width:100%; border-collapse: separate; border-spacing: 10px;">
+            `;
+
+            // Logic to simulate visual rows in a table
+            let layoutMatrix = [];
+            if(currentMode === 6) layoutMatrix = [3, 3];
+            else if(currentMode === 7) layoutMatrix = [2, 3, 2];
+            else if(currentMode === 8) layoutMatrix = [4, 4];
+            else if(currentMode === 9) layoutMatrix = [3, 3, 3];
+            else if(currentMode === 20) layoutMatrix = [4, 4, 4, 4, 4];
+            
+            let groupIndex = 0;
+            
+            layoutMatrix.forEach(colsInThisRow => {
+                wordHTML += `<tr>`;
+                
+                // Spacer for Mode 7 alignment (Simple visual centering hack for Word)
+                if(currentMode === 7 && colsInThisRow === 2) {
+                     wordHTML += `<td width="15%"></td>`; 
+                }
+
+                for(let c=0; c < colsInThisRow; c++) {
+                    if(groupIndex >= config.tables) break;
+                    
+                    wordHTML += `<td style="border: 2px solid #000; padding: 5px; vertical-align: top;">`;
+                    wordHTML += `<div style="font-size:10pt; margin-bottom:5px; background:#eee;">第 ${groupIndex+1} 組</div>`;
+                    
+                    // Inner Students
+                    wordHTML += `<table style="width:100%; border-collapse: collapse;">`;
+                    const seats = config.seatsPerTable;
+                    // Modified export logic for 20-group to show side-by-side
+                    if(seats === 2) {
+                        // 1 row, 2 cols
+                         const idx1 = groupIndex*seats + 0;
+                         const idx2 = groupIndex*seats + 1;
+                         wordHTML += `<tr>${getSeatHTML(idx1)} ${getSeatHTML(idx2)}</tr>`;
+                    } else {
+                        // Default multi-row logic
+                        const rowsInside = Math.ceil(seats / 2);
+                        for(let r=0; r<rowsInside; r++) {
+                            const idx1 = groupIndex*seats + r*2;
+                            const idx2 = groupIndex*seats + r*2 + 1;
+                            wordHTML += `<tr>${getSeatHTML(idx1)} ${idx2 < (groupIndex+1)*seats ? getSeatHTML(idx2) : ''}</tr>`;
+                        }
+                    }
+                    wordHTML += `</table></td>`;
+                    groupIndex++;
+                }
+                
+                if(currentMode === 7 && colsInThisRow === 2) {
+                     wordHTML += `<td width="15%"></td>`; 
+                }
+                
+                wordHTML += `</tr>`;
+            });
+            
+            wordHTML += `</table>`;
+            
+            // Absent list
+            const absents = gridState.filter(s => s && typeof s === 'object' && absentSet.has(s.id));
+            wordHTML += `<br><div style="border-top:1px solid #000; padding-top:10px;"><strong>缺席名單：</strong> `;
+            wordHTML += absents.length > 0 ? absents.map(s => `${s.displayId}${s.name}`).join('、') : "無";
+            wordHTML += `</div>`;
+
+            const blob = new Blob(['<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>' + wordHTML + '</body></html>'], {type: 'application/msword'});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `座位表_${getDateTimeString()}.doc`;
+            link.click();
+        }
+
+        function getSeatHTML(index) {
+            const item = gridState[index];
+            let style = `border: 1px solid #999; height: 50px; text-align: center; width: 50%; font-size:10pt;`;
+            if(item === 'LOCKED') return `<td style="${style} background:#ddd;">X</td>`;
+            if(item && typeof item === 'object') {
+                const isAbsent = absentSet.has(item.id);
+                if(isAbsent) style += "background:#ffcccc; color:#cc0000;";
+                return `<td style="${style}">${item.displayId}<br>${item.name}</td>`;
+            }
+            return `<td style="${style} color:#ccc;">空</td>`;
+        }
+
+        function exportToExcel() {
+             if (!gridState.some(x => x && typeof x === 'object')) {
+                alert("無資料！"); return;
+            }
+            let html = `<table border="1"><tr><td colspan="5">座位表名單</td></tr>`;
+            html += `<tr><td>組別</td><td>學號</td><td>姓名</td><td>原始資料</td><td>狀態</td></tr>`;
+            
+            const config = CONFIGS[currentMode];
+            gridState.forEach((item, idx) => {
+                if(item && typeof item === 'object') {
+                    const group = Math.floor(idx / config.seatsPerTable) + 1;
+                    const status = absentSet.has(item.id) ? '缺席' : '';
+                    html += `<tr><td>第${group}組</td><td style='mso-number-format:"\@";'>${item.displayId}</td><td>${item.name}</td><td>${item.originalClass} ${item.originalSeat}</td><td style="color:red">${status}</td></tr>`;
+                }
+            });
+            html += `</table>`;
+            const blob = new Blob([html], {type: 'application/vnd.ms-excel'});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `名單_${getDateTimeString()}.xls`;
+            link.click();
+        }
+    </script>
+</body>
+</html>
