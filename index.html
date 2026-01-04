@@ -115,8 +115,8 @@
     <!-- Header -->
     <header class="mb-6 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg shadow no-print">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-chair mr-2 text-indigo-600"></i>多元隨機座位表 <span class="text-sm text-white bg-indigo-600 px-2 py-1 rounded ml-2">多模式版</span></h1>
-            <p class="text-sm text-gray-500 mt-1">支援：圓桌/方桌切換、7組交錯排列、拖曳換位、缺席管理</p>
+            <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-chair mr-2 text-indigo-600"></i>多元隨機座位表 <span class="text-sm text-white bg-indigo-600 px-2 py-1 rounded ml-2">智慧均分版</span></h1>
+            <p class="text-sm text-gray-500 mt-1">支援：圓桌均分、7組交錯、20組並列、拖曳換位、缺席管理</p>
         </div>
         <div class="mt-4 md:mt-0 text-right">
             <div id="clock" class="text-xl font-mono font-bold text-indigo-600"></div>
@@ -144,11 +144,11 @@
                     <span class="bg-gray-800 text-white px-2 py-0.5 rounded text-xs mr-2">步驟 2</span>選擇組別模式
                 </label>
                 <select id="groupMode" onchange="changeGroupMode()" class="w-full p-2 border-2 border-indigo-200 rounded text-indigo-900 font-bold focus:ring-2 focus:ring-indigo-500">
-                    <option value="6" selected>6 組 (2x3 矩陣) - 每組6人 [圓桌]</option>
-                    <option value="9">9 組 (3x3 矩陣) - 每組4人 [方桌]</option>
-                    <option value="7">7 組 (2-3-2 排列) - 每組5人 [圓桌]</option>
-                    <option value="8">8 組 (2x4 矩陣) - 每組5人 [方桌]</option>
-                    <option value="20">20 組 (5x4 矩陣) - 每組2人 [方桌]</option>
+                    <option value="6" selected>6 組 (2x3 矩陣) - 每組6人 [圓桌/均分]</option>
+                    <option value="9">9 組 (3x3 矩陣) - 每組4人 [方桌/均分]</option>
+                    <option value="7">7 組 (2-3-2 排列) - 每組5人 [圓桌/均分]</option>
+                    <option value="8">8 組 (2x4 矩陣) - 每組5人 [方桌/依序]</option>
+                    <option value="20">20 組 (5x4 矩陣) - 每組2人 [方桌/依序/並列]</option>
                 </select>
                 <div id="mode-desc" class="text-xs text-gray-500 mt-1 ml-1">
                     當前設定：3列3行，共36人
@@ -225,7 +225,6 @@
         </div>
 
         <!-- The Grid Container -->
-        <!-- Flex is used here to handle the 7-group staggered layout nicely -->
         <div id="tables-grid" class="flex flex-wrap justify-center gap-6 w-full">
             <!-- JS will populate this -->
         </div>
@@ -233,18 +232,17 @@
 
     <script>
         // --- Configuration ---
+        // Added 'distribute: true' for modes 6, 7, 9 to enable round-robin filling
         const CONFIGS = {
-            6: { tables: 6, seatsPerTable: 6, style: 'round', desc: '6組 (2x3矩陣) - 圓桌6人', widthClass: 'w-[30%] md:w-[30%]' },
-            // Updated: 7 groups, 5 seats, 2-3-2 layout forced in renderGrid
-            7: { tables: 7, seatsPerTable: 5, style: 'round', desc: '7組 (2-3-2交錯) - 圓桌5人', widthClass: 'w-[45%] md:w-[30%] lg:w-[30%]' }, 
-            8: { tables: 8, seatsPerTable: 5, style: 'rect', desc: '8組 (2x4矩陣) - 方桌5人', widthClass: 'w-[45%] md:w-[22%]' },
-            9: { tables: 9, seatsPerTable: 4, style: 'rect', desc: '9組 (3x3矩陣) - 方桌4人', widthClass: 'w-[30%] md:w-[30%]' },
-            // 20 groups now use widthClass approx 22% and will rely on renderGrid logic for side-by-side
-            20: { tables: 20, seatsPerTable: 2, style: 'rect', desc: '20組 (5x4矩陣) - 方桌2人', widthClass: 'w-[22%] md:w-[22%]' }
+            6: { tables: 6, seatsPerTable: 6, style: 'round', distribute: true, desc: '6組 (2x3矩陣) - 圓桌6人 [均分]', widthClass: 'w-[30%] md:w-[30%]' },
+            7: { tables: 7, seatsPerTable: 5, style: 'round', distribute: true, desc: '7組 (2-3-2交錯) - 圓桌5人 [均分]', widthClass: 'w-[45%] md:w-[30%] lg:w-[30%]' }, 
+            8: { tables: 8, seatsPerTable: 5, style: 'rect', distribute: false, desc: '8組 (2x4矩陣) - 方桌5人', widthClass: 'w-[45%] md:w-[22%]' },
+            9: { tables: 9, seatsPerTable: 4, style: 'rect', distribute: true, desc: '9組 (3x3矩陣) - 方桌4人 [均分]', widthClass: 'w-[30%] md:w-[30%]' },
+            20: { tables: 20, seatsPerTable: 2, style: 'rect', distribute: false, desc: '20組 (5x4矩陣) - 方桌2人', widthClass: 'w-[22%] md:w-[22%]' }
         };
 
         // --- State ---
-        let currentMode = 6; // Default set to 6
+        let currentMode = 6; // Default to 6
         let gridState = []; // Will store {student} or 'LOCKED' or null
         let absentSet = new Set();
         let isLockMode = false;
@@ -262,12 +260,9 @@
             currentMode = parseInt(select.value);
             const config = CONFIGS[currentMode];
 
-            // Update UI Text
             document.getElementById('mode-desc').innerText = `目前設定：${config.desc} (總位數: ${config.tables * config.seatsPerTable})`;
 
-            // Reset Grid Data Structure
             const totalCapacity = config.tables * config.seatsPerTable;
-            
             gridState = new Array(totalCapacity).fill(null);
             absentSet.clear();
             
@@ -285,15 +280,13 @@
             let newStudents = [];
             const lines = rawText.split('\n');
             lines.forEach(line => {
-                let parts = line.split(/[\t\s]+/); // Split by tab or space
-                parts = parts.filter(p => p.trim() !== ''); // Clean empty
+                let parts = line.split(/[\t\s]+/); 
+                parts = parts.filter(p => p.trim() !== '');
                 
                 if (parts.length >= 3) {
-                    // Class | Seat | Name
                     const cls = parts[0].trim();
                     const seat = parts[1].trim();
                     const name = parts[2].trim();
-                    // ID Formatting
                     const cleanClass = cls.replace(/\D/g, ''); 
                     const cleanSeat = seat.replace(/\D/g, '');
                     const paddedSeat = cleanSeat.length === 1 ? '0' + cleanSeat : cleanSeat;
@@ -304,12 +297,11 @@
                         originalClass: cls, originalSeat: seat
                     });
                 } else if (parts.length === 2) {
-                    // Smart Detect: Seat|Name OR Class|Seat
                     const p1 = parts[0].trim();
                     const p2 = parts[1].trim();
                     const isP2Num = /^\d+$/.test(p2.replace(/\D/g, ''));
                     
-                    if (isP2Num) { // Class + Seat
+                    if (isP2Num) { 
                         const cleanSeat = p2.replace(/\D/g, '');
                         newStudents.push({
                             id: Math.random().toString(36).substr(2, 9),
@@ -317,7 +309,7 @@
                             name: '同學',
                             originalClass: p1, originalSeat: p2
                         });
-                    } else { // Seat + Name
+                    } else { 
                          const cleanSeat = p1.replace(/\D/g, '');
                          newStudents.push({
                             id: Math.random().toString(36).substr(2, 9),
@@ -329,29 +321,74 @@
                 }
             });
 
-            // 2. Prepare Slots
-            let availableIndices = [];
-            for(let i=0; i<gridState.length; i++) {
-                if(gridState[i] !== 'LOCKED') availableIndices.push(i);
-            }
-
-            if(newStudents.length > availableIndices.length) {
-                alert(`警告：名單有 ${newStudents.length} 人，但可用座位只有 ${availableIndices.length} 個。\n超出的學生將無法排入。`);
-            }
-
-            // 3. Shuffle & Fill
-            shuffleArray(newStudents);
-            
-            // Clear current non-locked students
+            // 2. Clear students but keep locks
             for(let i=0; i<gridState.length; i++) {
                 if(gridState[i] !== 'LOCKED') gridState[i] = null;
             }
 
-            newStudents.forEach((student, i) => {
-                if(i < availableIndices.length) {
-                    gridState[availableIndices[i]] = student;
+            const config = CONFIGS[currentMode];
+            shuffleArray(newStudents);
+
+            // 3. Distribute Logic
+            if (config.distribute) {
+                // Round-Robin Distribution for modes 6, 7, 9
+                
+                // Identify valid slots per table
+                let tableSlots = [];
+                for(let t=0; t<config.tables; t++) {
+                    let slots = [];
+                    for(let s=0; s<config.seatsPerTable; s++) {
+                        let idx = t * config.seatsPerTable + s;
+                        if(gridState[idx] !== 'LOCKED') {
+                            slots.push(idx);
+                        }
+                    }
+                    tableSlots.push(slots);
                 }
-            });
+
+                // Check total capacity
+                let totalSlots = tableSlots.reduce((acc, val) => acc + val.length, 0);
+                if(newStudents.length > totalSlots) {
+                    alert(`警告：名單有 ${newStudents.length} 人，但可用座位只有 ${totalSlots} 個。`);
+                }
+
+                // Distribute
+                let currentTable = 0;
+                let assignedCount = 0;
+                
+                while(assignedCount < newStudents.length && totalSlots > 0) {
+                    // Try to place in currentTable
+                    if(tableSlots[currentTable].length > 0) {
+                        const slotIdx = tableSlots[currentTable].shift(); // Get first available slot
+                        gridState[slotIdx] = newStudents[assignedCount];
+                        assignedCount++;
+                        totalSlots--;
+                    }
+                    // Move to next table
+                    currentTable = (currentTable + 1) % config.tables;
+                    
+                    // Safety break if stuck (should be covered by totalSlots check)
+                    if(totalSlots <= 0 && assignedCount < newStudents.length) break; 
+                }
+
+            } else {
+                // Linear / Sequential Fill for modes 8, 20
+                // This ensures pairs are kept together in tables (filling Table 1 first, then Table 2...)
+                let availableIndices = [];
+                for(let i=0; i<gridState.length; i++) {
+                    if(gridState[i] !== 'LOCKED') availableIndices.push(i);
+                }
+
+                if(newStudents.length > availableIndices.length) {
+                    alert(`警告：名單有 ${newStudents.length} 人，但可用座位只有 ${availableIndices.length} 個。`);
+                }
+
+                newStudents.forEach((student, i) => {
+                    if(i < availableIndices.length) {
+                        gridState[availableIndices[i]] = student;
+                    }
+                });
+            }
 
             absentSet.clear();
             renderGrid();
@@ -430,7 +467,6 @@
             if (isLockMode || dragSrcIndex === null || dragSrcIndex === targetIndex) return false;
             if (gridState[targetIndex] === 'LOCKED') return false;
 
-            // Swap
             const temp = gridState[targetIndex];
             gridState[targetIndex] = gridState[dragSrcIndex];
             gridState[dragSrcIndex] = temp;
@@ -453,69 +489,59 @@
             let studentCount = 0;
 
             for (let t = 0; t < tables; t++) {
-                // FORCE LINE BREAKS FOR MODE 7 (2 - 3 - 2 Layout)
+                // MODE 7 Line Breaks
                 if (currentMode === 7) {
                     if (t === 2 || t === 5) {
                         const breakDiv = document.createElement('div');
-                        breakDiv.className = "w-full h-0"; // Force wrap
+                        breakDiv.className = "w-full h-0"; 
                         container.appendChild(breakDiv);
                     }
                 }
 
-                // Table Container
                 const tableDiv = document.createElement('div');
-                // Apply width class based on config for flex layout
                 tableDiv.className = `relative p-2 mb-4 ${config.widthClass} flex-shrink-0`;
                 
-                // Determine styling based on shape
                 const shapeClass = isRound ? 'table-round' : 'table-rect';
                 
-                // Create visual table wrapper
                 const visualTable = document.createElement('div');
                 visualTable.className = `${shapeClass} w-full h-full relative`;
                 
-                // Table Label
                 const label = document.createElement('div');
                 label.className = "absolute -top-3 left-0 bg-white border border-gray-400 text-gray-800 text-xs font-bold px-2 py-0.5 rounded shadow-sm z-20";
                 label.innerText = `第 ${t + 1} 組`;
                 tableDiv.appendChild(label);
 
-                // Seat Grid Container
                 const seatContainer = document.createElement('div');
                 if (isRound) {
-                    seatContainer.className = "seat-grid"; // Special flex layout for round
+                    seatContainer.className = "seat-grid"; 
                 } else {
-                    // Rect layout
-                    // Updated logic: Always use 2 cols unless seatsPer=1 (unlikely)
-                    // This ensures 20-group (2 seats) are side-by-side (1 row, 2 cols)
+                    // Rect layout logic
+                    // Group 20 (seats=2): Use 2 cols to show side-by-side
+                    // Others: Use 2 cols default
                     let gridCols = 2;
                     if(seatsPer === 1) gridCols = 1;
                     seatContainer.className = `grid grid-cols-${gridCols} gap-2 w-full`;
                 }
 
-                // Generate Seats
                 for (let s = 0; s < seatsPer; s++) {
                     const globalIndex = t * seatsPer + s;
                     const item = gridState[globalIndex];
                     
                     const seatDiv = document.createElement('div');
                     
-                    // Style logic
                     let baseClass = "seat-card cursor-pointer ";
-                    if(!isRound) baseClass += "h-16 border rounded "; // Rect styles
+                    if(!isRound) baseClass += "h-16 border rounded "; 
                     
                     if (item === 'LOCKED') {
                         seatDiv.className = baseClass + "seat-locked";
                         if(!isRound) seatDiv.innerHTML = '<i class="fa-solid fa-ban"></i>';
-                        else seatDiv.innerHTML = '<i class="fa-solid fa-ban"></i>'; // Round lock
+                        else seatDiv.innerHTML = '<i class="fa-solid fa-ban"></i>'; 
                     } else if (item) {
-                        // Student
                         studentCount++;
                         const isAbsent = absentSet.has(item.id);
                         seatDiv.className = baseClass + "student-active border-gray-300 hover:shadow-md " + (isAbsent ? "absent" : "");
                         seatDiv.draggable = !isLockMode;
                         
-                        // Font adjustments
                         const fontSize = isRound ? "text-xs" : "text-base";
                         
                         seatDiv.innerHTML = `
@@ -527,7 +553,6 @@
                         seatDiv.ondrop = (e) => handleDrop(e, globalIndex);
                         seatDiv.ondragover = handleDragOver;
                     } else {
-                        // Empty
                         seatDiv.className = baseClass + "border-dashed border-gray-300 opacity-50";
                         seatDiv.innerHTML = "<span class='text-gray-300 text-xs'>空</span>";
                         seatDiv.ondrop = (e) => handleDrop(e, globalIndex);
@@ -561,7 +586,7 @@
             return `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
         }
 
-        // --- Export to Word (Complex Layout Handling) ---
+        // --- Export ---
         function exportToWord() {
             if (!gridState.some(x => x && typeof x === 'object')) {
                 alert("無資料可匯出！"); return;
@@ -570,7 +595,6 @@
             const config = CONFIGS[currentMode];
             const timeStr = document.getElementById('print-time').innerText;
             
-            // Build HTML
             let wordHTML = `
                 <h2 style="text-align:center; font-size:24px; margin-bottom:10px;">多元隨機座位表 (${config.desc})</h2>
                 <p style="text-align:center; margin-bottom:20px; font-size:10pt;">${timeStr}</p>
@@ -578,7 +602,6 @@
                 <table style="width:100%; border-collapse: separate; border-spacing: 10px;">
             `;
 
-            // Logic to simulate visual rows in a table
             let layoutMatrix = [];
             if(currentMode === 6) layoutMatrix = [3, 3];
             else if(currentMode === 7) layoutMatrix = [2, 3, 2];
@@ -591,10 +614,7 @@
             layoutMatrix.forEach(colsInThisRow => {
                 wordHTML += `<tr>`;
                 
-                // Spacer for Mode 7 alignment (Simple visual centering hack for Word)
-                if(currentMode === 7 && colsInThisRow === 2) {
-                     wordHTML += `<td width="15%"></td>`; 
-                }
+                if(currentMode === 7 && colsInThisRow === 2) wordHTML += `<td width="15%"></td>`; 
 
                 for(let c=0; c < colsInThisRow; c++) {
                     if(groupIndex >= config.tables) break;
@@ -602,17 +622,15 @@
                     wordHTML += `<td style="border: 2px solid #000; padding: 5px; vertical-align: top;">`;
                     wordHTML += `<div style="font-size:10pt; margin-bottom:5px; background:#eee;">第 ${groupIndex+1} 組</div>`;
                     
-                    // Inner Students
                     wordHTML += `<table style="width:100%; border-collapse: collapse;">`;
                     const seats = config.seatsPerTable;
-                    // Modified export logic for 20-group to show side-by-side
+                    
                     if(seats === 2) {
-                        // 1 row, 2 cols
+                        // Group 20: Side by side export
                          const idx1 = groupIndex*seats + 0;
                          const idx2 = groupIndex*seats + 1;
                          wordHTML += `<tr>${getSeatHTML(idx1)} ${getSeatHTML(idx2)}</tr>`;
                     } else {
-                        // Default multi-row logic
                         const rowsInside = Math.ceil(seats / 2);
                         for(let r=0; r<rowsInside; r++) {
                             const idx1 = groupIndex*seats + r*2;
@@ -624,16 +642,13 @@
                     groupIndex++;
                 }
                 
-                if(currentMode === 7 && colsInThisRow === 2) {
-                     wordHTML += `<td width="15%"></td>`; 
-                }
+                if(currentMode === 7 && colsInThisRow === 2) wordHTML += `<td width="15%"></td>`; 
                 
                 wordHTML += `</tr>`;
             });
             
             wordHTML += `</table>`;
             
-            // Absent list
             const absents = gridState.filter(s => s && typeof s === 'object' && absentSet.has(s.id));
             wordHTML += `<br><div style="border-top:1px solid #000; padding-top:10px;"><strong>缺席名單：</strong> `;
             wordHTML += absents.length > 0 ? absents.map(s => `${s.displayId}${s.name}`).join('、') : "無";
